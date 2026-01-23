@@ -36,11 +36,36 @@ pub(crate) fn open_store_helper(store_path: &PathBuf, passphrase: &Secret) -> Re
     match SecretStore::open(store_path, passphrase) {
         Ok(s) => Ok(s),
         Err(e) => {
-            // Check if it's a NotFound error
-            if let timely_pass_sdk::error::Error::Io(ref io_err) = e {
-                if io_err.kind() == std::io::ErrorKind::NotFound {
-                    anyhow::bail!("Store file not found at {:?}.\nPlease run 'timely-pass init' first to create a new store.", store_path);
-                }
+            // Check specific errors to provide better messages
+            match e {
+                timely_pass_sdk::error::Error::Io(ref io_err) => {
+                    if io_err.kind() == std::io::ErrorKind::NotFound {
+                        anyhow::bail!("Store file not found at {:?}.\nPlease run 'timely-pass init' first to create a new store.", store_path);
+                    }
+                    if io_err.kind() == std::io::ErrorKind::UnexpectedEof {
+                         if let Ok(metadata) = std::fs::metadata(store_path) {
+                             if metadata.len() == 0 {
+                                 anyhow::bail!("Store file at {:?} is empty.\nPlease delete it and run 'timely-pass init' to create a new store.", store_path);
+                             }
+                         }
+                    }
+                },
+                timely_pass_sdk::error::Error::Serialization(ref bin_err) => {
+                    // Check if it's an IO error wrapped in Serialization (common with bincode)
+                    if let bincode::ErrorKind::Io(ref io_err) = **bin_err {
+                        if io_err.kind() == std::io::ErrorKind::UnexpectedEof {
+                             anyhow::bail!("Store file at {:?} is corrupted (incomplete data).\nPlease delete it and run 'timely-pass init' again.", store_path);
+                        }
+                    }
+                    // General corruption message
+                    anyhow::bail!("Store file at {:?} is corrupted or invalid: {}\nPlease delete it and run 'timely-pass init' again.", store_path, bin_err);
+                },
+                timely_pass_sdk::error::Error::Crypto(ref msg) => {
+                    if msg == "Decryption failed" {
+                        anyhow::bail!("Failed to decrypt the store. \n\nCause: Incorrect passphrase or corrupted file.\n\nPlease try again with the correct passphrase.");
+                    }
+                },
+                _ => {}
             }
             Err(e.into())
         }
@@ -77,6 +102,10 @@ pub async fn add(
 ) -> Result<()> {
     let passphrase = prompt_passphrase(false)?;
     let mut store = open_store_helper(&store_path, &passphrase)?;
+
+    if store.get_credential(&id).is_some() {
+        anyhow::bail!("Credential '{}' already exists.\nUse 'timely-pass remove --id {}' first if you want to replace it.", id, id);
+    }
 
     let secret_data = if read_secret {
         prompt_secret()?
@@ -135,8 +164,15 @@ pub async fn get(store_path: PathBuf, id: String) -> Result<()> {
             match eval.verdict {
                 Verdict::Accept => {},
                 v => {
-                    println!("Access Denied: {:?}", v);
-                    println!("Details: {:?}", eval.details);
+                    println!("\n❌ ACCESS DENIED");
+                    println!("Reason: {:?}", v);
+                    println!("Policy ID: {}", pid);
+                    if !eval.details.is_empty() {
+                        println!("\nDetails:");
+                        for (key, val) in eval.details {
+                            println!("  - {}: {}", key, val);
+                        }
+                    }
                     return Ok(());
                 }
             }
@@ -189,6 +225,8 @@ pub async fn list(store_path: PathBuf) -> Result<()> {
     let creds = store.list_credentials();
     if creds.is_empty() {
         println!("No credentials found.");
+        println!("\nHint: Add a credential using:");
+        println!("  timely-pass add --id <name> --secret");
     } else {
         println!("{:<20} {:<20} {:<30}", "ID", "Type", "Created At");
         println!("{:-<20} {:-<20} {:-<30}", "", "", "");
@@ -210,21 +248,157 @@ pub async fn rotate(store_path: PathBuf, id: String) -> Result<()> {
     println!("Rotating credential '{}'", id);
     let new_secret_data = prompt_secret()?;
     
-    // We need a replace/update method in SDK.
-    // For now, remove and add (not atomic, but works for MVP).
-    // Wait, SDK doesn't have remove yet.
-    // I should add `update_credential` to SDK.
-    
-    // Since I can't easily change SDK in this file, I'll assume I can just overwrite with `add_credential` 
-    // because `add_credential` in `store.rs` uses `HashMap::insert` which overwrites.
-    // But I need to preserve metadata (created_at, policy).
-    
     // Fetch, modify, insert.
     if let Some(mut cred) = store.get_credential(&id).cloned() {
         cred.secret.data = new_secret_data;
         cred.updated_at = Utc::now();
         store.add_credential(cred)?;
         println!("Rotated successfully.");
+    }
+
+    Ok(())
+}
+
+pub async fn policy_add(store_path: PathBuf, id: Option<String>, file: PathBuf) -> Result<()> {
+    let passphrase = prompt_passphrase(false)?;
+    let mut store = open_store_helper(&store_path, &passphrase)?;
+
+    let content = fs::read_to_string(&file).context("Failed to read policy file")?;
+    
+    // Try JSON first, then TOML
+    let mut policy: Policy = match serde_json::from_str(&content) {
+        Ok(p) => p,
+        Err(_) => toml::from_str(&content).context("Failed to parse policy as JSON or TOML")?,
+    };
+
+    if let Some(new_id) = id {
+        policy.id = new_id;
+    }
+
+    store.add_policy(policy.clone())?;
+    println!("Policy '{}' added/updated.", policy.id);
+    Ok(())
+}
+
+pub async fn policy_get(store_path: PathBuf, id: String) -> Result<()> {
+    let passphrase = prompt_passphrase(false)?;
+    let store = open_store_helper(&store_path, &passphrase)?;
+
+    if let Some(policy) = store.get_policy(&id) {
+        println!("{}", serde_json::to_string_pretty(policy)?);
+    } else {
+        anyhow::bail!("Policy '{}' not found", id);
+    }
+    Ok(())
+}
+
+pub async fn policy_list(store_path: PathBuf) -> Result<()> {
+    let passphrase = prompt_passphrase(false)?;
+    let store = open_store_helper(&store_path, &passphrase)?;
+
+    let policies = store.list_policies();
+    if policies.is_empty() {
+        println!("No policies found.");
+    } else {
+        println!("{:<20} {:<10} {:<10}", "ID", "Version", "Hooks");
+        println!("{:-<20} {:-<10} {:-<10}", "", "", "");
+        for p in policies {
+            println!("{:<20} {:<10} {:<10}", p.id, p.version, p.hooks.len());
+        }
+    }
+    Ok(())
+}
+
+pub async fn policy_remove(store_path: PathBuf, id: String) -> Result<()> {
+    let passphrase = prompt_passphrase(false)?;
+    let mut store = open_store_helper(&store_path, &passphrase)?;
+
+    store.remove_policy(&id)?;
+    println!("Policy '{}' removed.", id);
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn policy_update(
+    store_path: PathBuf,
+    id: String,
+    enable: bool,
+    disable: bool,
+    skew: Option<u64>,
+    timezone: Option<String>,
+    max_attempts: Option<u32>,
+    single_use: bool,
+    multi_use: bool,
+) -> Result<()> {
+    let passphrase = prompt_passphrase(false)?;
+    let mut store = open_store_helper(&store_path, &passphrase)?;
+
+    if let Some(mut policy) = store.get_policy(&id).cloned() {
+        let mut updated = false;
+
+        if enable {
+            policy.enabled = true;
+            updated = true;
+        } else if disable {
+            policy.enabled = false;
+            updated = true;
+        }
+
+        if let Some(s) = skew {
+            policy.clock_skew_secs = s;
+            updated = true;
+        }
+
+        if let Some(tz) = timezone {
+            policy.timezone = Some(tz);
+            updated = true;
+        }
+
+        if let Some(ma) = max_attempts {
+            policy.max_attempts = Some(ma);
+            updated = true;
+        }
+
+        if single_use {
+            policy.single_use = true;
+            updated = true;
+        } else if multi_use {
+            policy.single_use = false;
+            updated = true;
+        }
+
+        if updated {
+            policy.version += 1;
+            store.add_policy(policy)?;
+            println!("Policy '{}' updated.", id);
+        } else {
+            println!("No changes requested for policy '{}'.", id);
+        }
+    } else {
+        anyhow::bail!("Policy '{}' not found", id);
+    }
+    Ok(())
+}
+
+pub async fn upgrade(version: Option<String>) -> Result<()> {
+    println!("Upgrading timely-pass-cli...");
+
+    let mut cmd = std::process::Command::new("cargo");
+    cmd.arg("install");
+    cmd.arg("timely-pass-cli");
+
+    if let Some(v) = version {
+        println!("Target version: {}", v);
+        cmd.arg("--version");
+        cmd.arg(v);
+    }
+
+    let status = cmd.status().context("Failed to execute cargo install")?;
+
+    if status.success() {
+        println!("Upgrade completed successfully.");
+    } else {
+        anyhow::bail!("Upgrade failed with exit code: {:?}", status.code());
     }
 
     Ok(())

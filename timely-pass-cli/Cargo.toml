@@ -11,8 +11,6 @@ path = "src/main.rs"
 timely-pass-sdk = { path = "../timely-pass-sdk" }
 clap = { version = "4.4", features = ["derive"] }
 anyhow = "1.0"
-ratatui = "0.26"
-crossterm = "0.27"
 tokio = { version = "1.35", features = ["full"] }
 chrono = "0.4"
 serde = "1.0"
@@ -20,4 +18,4 @@ serde_json = "1.0"
 toml = "0.8"
 rpassword = "7.4.0"
 hex = "0.4.3"
-arboard = "3.3"
+bincode = "1.3"
