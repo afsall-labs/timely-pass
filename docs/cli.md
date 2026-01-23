@@ -151,3 +151,28 @@ timely-pass eval --policy <PATH> [--time <ISO-8601>]
 ```bash
 timely-pass eval --policy policies/working-hours.toml --time "2024-01-23T20:00:00Z"
 ```
+
+---
+
+### `tui`
+
+Launches the interactive Terminal User Interface. This provides a visual way to manage your store with keyboard shortcuts.
+
+**Usage:**
+```bash
+timely-pass tui
+```
+
+**Key Bindings:**
+
+| Key | Action |
+| :--- | :--- |
+| `a` | **Add** a new credential |
+| `d` / `Delete` | **Delete** selected credential |
+| `r` | **Rotate** secret for selected credential |
+| `/` | **Search** / Filter list |
+| `c` | **Copy** secret to clipboard |
+| `Enter` | **Reveal/Hide** secret details |
+| `Esc` | Cancel action / Clear search / Quit |
+| `q` | Quit application |
+
