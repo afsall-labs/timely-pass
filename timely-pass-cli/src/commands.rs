@@ -60,6 +60,11 @@ pub(crate) fn open_store_helper(store_path: &PathBuf, passphrase: &Secret) -> Re
                     // General corruption message
                     anyhow::bail!("Store file at {:?} is corrupted or invalid: {}\nPlease delete it and run 'timely-pass init' again.", store_path, bin_err);
                 },
+                timely_pass_sdk::error::Error::Crypto(ref msg) => {
+                    if msg == "Decryption failed" {
+                        anyhow::bail!("Failed to decrypt the store. \n\nCause: Incorrect passphrase or corrupted file.\n\nPlease try again with the correct passphrase.");
+                    }
+                },
                 _ => {}
             }
             Err(e.into())
@@ -97,6 +102,10 @@ pub async fn add(
 ) -> Result<()> {
     let passphrase = prompt_passphrase(false)?;
     let mut store = open_store_helper(&store_path, &passphrase)?;
+
+    if store.get_credential(&id).is_some() {
+        anyhow::bail!("Credential '{}' already exists.\nUse 'timely-pass remove --id {}' first if you want to replace it.", id, id);
+    }
 
     let secret_data = if read_secret {
         prompt_secret()?
@@ -155,8 +164,15 @@ pub async fn get(store_path: PathBuf, id: String) -> Result<()> {
             match eval.verdict {
                 Verdict::Accept => {},
                 v => {
-                    println!("Access Denied: {:?}", v);
-                    println!("Details: {:?}", eval.details);
+                    println!("\n❌ ACCESS DENIED");
+                    println!("Reason: {:?}", v);
+                    println!("Policy ID: {}", pid);
+                    if !eval.details.is_empty() {
+                        println!("\nDetails:");
+                        for (key, val) in eval.details {
+                            println!("  - {}: {}", key, val);
+                        }
+                    }
                     return Ok(());
                 }
             }
@@ -209,6 +225,8 @@ pub async fn list(store_path: PathBuf) -> Result<()> {
     let creds = store.list_credentials();
     if creds.is_empty() {
         println!("No credentials found.");
+        println!("\nHint: Add a credential using:");
+        println!("  timely-pass add --id <name> --secret");
     } else {
         println!("{:<20} {:<20} {:<30}", "ID", "Type", "Created At");
         println!("{:-<20} {:-<20} {:-<30}", "", "", "");
