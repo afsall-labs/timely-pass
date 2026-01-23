@@ -26,7 +26,13 @@ pub struct Policy {
     pub clock_skew_secs: u64,
     pub max_attempts: Option<u32>,
     pub single_use: bool,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
     pub version: u32,
+}
+
+fn default_enabled() -> bool {
+    true
 }
 
 impl Default for Policy {
@@ -38,6 +44,7 @@ impl Default for Policy {
             clock_skew_secs: 60,
             max_attempts: None,
             single_use: false,
+            enabled: true,
             version: 1,
         }
     }

@@ -61,10 +61,33 @@ struct StoreHeader {
     salt: Vec<u8>, // Salt used for KDF to derive MasterKey
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AuditEntry {
+    pub timestamp: DateTime<Utc>,
+    pub action: String,
+    pub target_type: String, // "credential", "policy", "system"
+    pub target_id: String,
+    pub details: String,
+}
+
+impl AuditEntry {
+    pub fn new(action: impl Into<String>, target_type: impl Into<String>, target_id: impl Into<String>, details: impl Into<String>) -> Self {
+        Self {
+            timestamp: Utc::now(),
+            action: action.into(),
+            target_type: target_type.into(),
+            target_id: target_id.into(),
+            details: details.into(),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 struct StorePayload {
     credentials: HashMap<String, Credential>,
     policies: HashMap<String, Policy>,
+    #[serde(default)]
+    audit_logs: Vec<AuditEntry>,
 }
 
 pub struct SecretStore {
@@ -73,6 +96,7 @@ pub struct SecretStore {
     salt: Vec<u8>,
     credentials: HashMap<String, Credential>,
     policies: HashMap<String, Policy>,
+    audit_logs: Vec<AuditEntry>,
 }
 
 impl SecretStore {
@@ -85,6 +109,7 @@ impl SecretStore {
             salt,
             credentials: HashMap::new(),
             policies: HashMap::new(),
+            audit_logs: vec![AuditEntry::new("init", "system", "store", "Store initialized")],
         };
         
         store.save()?;
@@ -92,41 +117,33 @@ impl SecretStore {
     }
 
     pub fn open(path: impl AsRef<Path>, passphrase: &Secret) -> Result<Self> {
-        let path = path.as_ref();
-        let mut file = File::open(path)?;
-        let mut contents = Vec::new();
-        file.read_to_end(&mut contents)?;
-
-        // Simple format: 
-        // 4 bytes header length (u32 le)
-        // header bytes (json or bincode)
-        // rest is encrypted payload
-
-        if contents.len() < 4 {
-            return Err(Error::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, "File too short")));
-        }
-
-        let header_len = u32::from_le_bytes(contents[0..4].try_into().unwrap()) as usize;
-        if contents.len() < 4 + header_len {
-            return Err(Error::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, "File truncated")));
-        }
-
-        let header_bytes = &contents[4..4 + header_len];
-        let header: StoreHeader = bincode::deserialize(header_bytes)?;
-
-        let (master_key, _) = MasterKey::derive_from_passphrase(passphrase, Some(&header.salt))?;
-
-        let encrypted_payload = &contents[4 + header_len..];
-        let decrypted_bytes = master_key.decrypt(encrypted_payload, header_bytes)?; // Authenticate with header
-
-        let payload: StorePayload = bincode::deserialize(&decrypted_bytes)?;
-
+        let path = path.as_ref().to_path_buf();
+        let mut file = File::open(&path).map_err(Error::Io)?;
+        
+        let mut header_len_bytes = [0u8; 4];
+        file.read_exact(&mut header_len_bytes).map_err(Error::Io)?;
+        let header_len = u32::from_le_bytes(header_len_bytes) as usize;
+        
+        let mut header_bytes = vec![0u8; header_len];
+        file.read_exact(&mut header_bytes).map_err(Error::Io)?;
+        
+        let header: StoreHeader = bincode::deserialize(&header_bytes)?;
+        
+        let mut encrypted_payload = Vec::new();
+        file.read_to_end(&mut encrypted_payload).map_err(Error::Io)?;
+        
+        let master_key = MasterKey::derive_from_passphrase(passphrase, Some(&header.salt))?.0;
+        
+        let payload_bytes = master_key.decrypt(&encrypted_payload, &header_bytes)?;
+        let payload: StorePayload = bincode::deserialize(&payload_bytes)?;
+        
         Ok(Self {
-            path: path.to_path_buf(),
+            path,
             master_key,
             salt: header.salt,
             credentials: payload.credentials,
             policies: payload.policies,
+            audit_logs: payload.audit_logs,
         })
     }
 
@@ -142,6 +159,7 @@ impl SecretStore {
         let payload = StorePayload {
             credentials: self.credentials.clone(),
             policies: self.policies.clone(),
+            audit_logs: self.audit_logs.clone(),
         };
         let payload_bytes = bincode::serialize(&payload)?;
 
@@ -161,6 +179,7 @@ impl SecretStore {
     }
 
     pub fn add_policy(&mut self, policy: Policy) -> Result<()> {
+        self.audit_logs.push(AuditEntry::new("add", "policy", &policy.id, format!("Policy added/updated: version {}", policy.version)));
         self.policies.insert(policy.id.clone(), policy);
         self.save()
     }
@@ -171,6 +190,7 @@ impl SecretStore {
 
     pub fn remove_policy(&mut self, id: &str) -> Result<()> {
         if self.policies.remove(id).is_some() {
+            self.audit_logs.push(AuditEntry::new("remove", "policy", id, "Policy removed"));
             self.save()
         } else {
             Ok(())
@@ -181,7 +201,12 @@ impl SecretStore {
         self.policies.values().collect()
     }
 
+    pub fn get_audit_logs(&self) -> &[AuditEntry] {
+        &self.audit_logs
+    }
+
     pub fn add_credential(&mut self, cred: Credential) -> Result<()> {
+        self.audit_logs.push(AuditEntry::new("add", "credential", &cred.id, format!("Credential added: {}", cred.label)));
         self.credentials.insert(cred.id.clone(), cred);
         self.save()
     }
@@ -196,6 +221,7 @@ impl SecretStore {
 
     pub fn remove_credential(&mut self, id: &str) -> Result<()> {
         if self.credentials.remove(id).is_some() {
+            self.audit_logs.push(AuditEntry::new("remove", "credential", id, "Credential removed"));
             self.save()
         } else {
             Ok(())
@@ -206,6 +232,9 @@ impl SecretStore {
         if let Some(cred) = self.credentials.get_mut(id) {
             cred.usage_counter += 1;
             cred.updated_at = Utc::now();
+            // We don't necessarily want to log every usage in audit log to avoid bloat, 
+            // but for security it might be good. Let's log it.
+            self.audit_logs.push(AuditEntry::new("usage", "credential", id, "Credential accessed"));
             self.save()
         } else {
             Err(Error::Store(format!("Credential {} not found", id)))
