@@ -169,6 +169,18 @@ impl SecretStore {
         self.policies.get(id)
     }
 
+    pub fn remove_policy(&mut self, id: &str) -> Result<()> {
+        if self.policies.remove(id).is_some() {
+            self.save()
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn list_policies(&self) -> Vec<&Policy> {
+        self.policies.values().collect()
+    }
+
     pub fn add_credential(&mut self, cred: Credential) -> Result<()> {
         self.credentials.insert(cred.id.clone(), cred);
         self.save()
@@ -180,5 +192,23 @@ impl SecretStore {
 
     pub fn list_credentials(&self) -> Vec<&Credential> {
         self.credentials.values().collect()
+    }
+
+    pub fn remove_credential(&mut self, id: &str) -> Result<()> {
+        if self.credentials.remove(id).is_some() {
+            self.save()
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn increment_usage(&mut self, id: &str) -> Result<()> {
+        if let Some(cred) = self.credentials.get_mut(id) {
+            cred.usage_counter += 1;
+            cred.updated_at = Utc::now();
+            self.save()
+        } else {
+            Err(Error::Store(format!("Credential {} not found", id)))
+        }
     }
 }
