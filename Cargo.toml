@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "timely-pass-sdk",
+    "timely-pass-cli",
+]
+resolver = "2"

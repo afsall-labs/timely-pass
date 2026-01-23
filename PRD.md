@@ -579,3 +579,379 @@ SDK provides a parser and validator for the format.
 ## Final Notes (Security & Production-readiness)
 
 This PRD assumes strict adherence to modern cryptographic practices, secure defaults, and conservative optional features for hardware-backed keys and OS integrations. The SDK API must remain stable and minimal: consumers should be able to evaluate policies without depending on the CLI; CLI should be built on top of SDK. Every shipping artifact must be accompanied by documentation for secure parameter choices (Argon2, AEAD) and a clear migration/backup story. Automated tests (unit, property, integration), static auditing (`cargo-audit`), and reproducible builds are required before a v1.0 production release.
+
+---
+
+# Timely Pass — Ratatui UI Layout & Interaction Design
+
+**UI framework:** Ratatui
+**Target:** terminal-first power users, DevOps, security engineers
+**Constraints:** keyboard-only, deterministic rendering, no mouse reliance
+
+---
+
+## 1. UI Architecture Overview
+
+### 1.1 High-level UI model
+
+The UI follows a **state-driven, screen-based architecture**:
+
+```
+App
+ ├── GlobalState
+ │    ├── store_status (locked/unlocked)
+ │    ├── selected_credential
+ │    ├── notification_queue
+ │    └── clock (UTC + local)
+ ├── Screen
+ │    ├── Dashboard
+ │    ├── CredentialList
+ │    ├── CredentialDetail
+ │    ├── PolicyBuilder
+ │    ├── TimelineView
+ │    ├── AuditLog
+ │    └── Help
+ └── Modal
+      ├── Confirm
+      ├── PassphrasePrompt
+      ├── Error
+      └── Info
+```
+
+**Design choice (important):**
+
+* Screens are **full ownership views**.
+* Modals are **stacked overlays**, never nested screens.
+* No implicit navigation: every screen transition is explicit and logged.
+
+This prevents UI state corruption—a common Ratatui failure mode.
+
+---
+
+## 2. Global Layout Skeleton
+
+Every screen shares a common **root layout**.
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ Timely Pass │ Store: 🔓 Unlocked │ UTC 14:32 │ v0.1.0   │  ← Header
+├──────────────────────────────────────────────────────────┤
+│                                                          │
+│                                                          │
+│                    MAIN CONTENT                          │
+│                                                          │
+│                                                          │
+├──────────────────────────────────────────────────────────┤
+│ [H] Help  [/] Search  [Q] Quit  [↑↓←→] Navigate          │  ← Footer
+└──────────────────────────────────────────────────────────┘
+```
+
+### 2.1 Header (fixed)
+
+**Height:** 1 row
+**Contents:**
+
+* App name
+* Store lock status (🔒 / 🔓)
+* Current UTC time (authoritative)
+* Version
+
+**Reasoning:**
+Time is core to Timely Pass. Showing UTC **always** avoids ambiguity.
+
+---
+
+### 2.2 Footer (fixed)
+
+**Height:** 1 row
+**Purpose:** contextual shortcuts
+
+Footer contents change **per screen**, but must always show:
+
+* Quit
+* Help
+* Navigation hint
+
+---
+
+## 3. Dashboard Screen (Default)
+
+### Purpose
+
+* High-level situational awareness
+* Entry point for everything else
+
+### Layout
+
+```
+┌───────────────┬─────────────────────────────────────────┐
+│ Credentials   │ Timeline / Upcoming Windows             │
+│ (List)        │                                         │
+│               │   ── Now ──────────────────────▶        │
+│ ▸ vpn-admin   │   [09:00 ─ 17:00] work-vpn               │
+│   prod-db     │   [22:00 ─ 23:00] maintenance            │
+│   temp-share  │                                         │
+│               │                                         │
+├───────────────┴─────────────────────────────────────────┤
+│ Status: 3 active │ 1 expiring soon │ 2 locked            │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Widgets Used
+
+* Left: `List`
+* Right: custom `Canvas` or `Paragraph` (ASCII timeline)
+* Bottom: `Paragraph` (status summary)
+
+### Interaction
+
+* `↑↓`: select credential
+* `Enter`: open Credential Detail
+* `T`: open full Timeline View
+* `/`: filter credentials
+* `A`: add credential
+
+**Critical design note:**
+Do **not** attempt pixel-perfect timelines. ASCII timelines with labels are more reliable and readable in terminals.
+
+---
+
+## 4. Credential List Screen (Focused Mode)
+
+Used when users want to browse/search/manage credentials at scale.
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ Credentials (filter: "vpn")                              │
+├──────────────────────────────────────────────────────────┤
+│ ID            │ Type     │ Policy        │ Status        │
+│───────────────┼──────────┼───────────────┼──────────────│
+│ vpn-admin     │ Password │ weekday-9-5   │ ✔ Active     │
+│ vpn-backup    │ HMAC     │ emergency     │ ⏳ Pending   │
+│ temp-share-1  │ FileKey  │ 2h-only       │ ❌ Expired   │
+│               │          │               │              │
+└──────────────────────────────────────────────────────────┘
+```
+
+### Widgets
+
+* `Table` with fixed column widths
+* Row highlighting
+
+### Keyboard Model
+
+* `↑↓`: move row
+* `Enter`: open Credential Detail
+* `D`: delete (opens Confirm modal)
+* `R`: rotate credential
+* `E`: export credential
+* `Esc`: back to Dashboard
+
+**Performance note:**
+Tables over ~500 rows should paginate. Do not attempt virtual scrolling initially.
+
+---
+
+## 5. Credential Detail Screen
+
+This is where **security-sensitive actions** happen.
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ Credential: vpn-admin                                    │
+├──────────────────────────────────────────────────────────┤
+│ Metadata                                                 │
+│ ─────────                                                │
+│ ID: vpn-admin                                            │
+│ Type: Password                                           │
+│ Created: 2025-12-01T10:12Z                                │
+│ Policy: weekday-9-5                                      │
+│                                                         │
+│ Policy Summary                                           │
+│ ─────────────                                           │
+│ ✔ onlyWithin 09:00 → 17:00 UTC                           │
+│ ✖ single-use                                            │
+│ ✔ max_attempts: 5                                       │
+│                                                         │
+├──────────────────────────────────────────────────────────┤
+│ [S] Show Secret  [R] Rotate  [A] Audit Log  [Esc] Back   │
+└──────────────────────────────────────────────────────────┘
+```
+
+### Security UX rules
+
+* `Show Secret` **always** triggers:
+
+  1. Passphrase modal
+  2. Warning modal
+  3. Timed reveal (e.g., auto-hide after 10s)
+
+### Widgets
+
+* Multiple `Paragraph`s
+* Clear visual separators
+* Icons (✔ ✖ ⏳ ❌) using Unicode (fallback ASCII if unsupported)
+
+---
+
+## 6. Policy Builder Screen (High-Complexity)
+
+This is the hardest screen. It must be **structured**, not free-form.
+
+### Layout
+
+```
+┌────────────────────┬───────────────────────────────────┐
+│ Hooks               │ Policy Preview                    │
+│                    │                                   │
+│ [+] onlyWithin     │ id = "weekday-9-5"                │
+│ [+] onlyBefore     │ timezone = "UTC"                  │
+│ [+] onlyAfter      │                                   │
+│ [+] onlyFor        │ [[hooks]]                          │
+│                    │ type = "onlyWithin"               │
+│                    │ start = "09:00"                   │
+│                    │ end = "17:00"                     │
+│                    │                                   │
+├────────────────────┴───────────────────────────────────┤
+│ [Tab] Switch  [Enter] Edit  [S] Save  [Esc] Cancel     │
+└──────────────────────────────────────────────────────────┘
+```
+
+### Interaction Model
+
+* Left pane: hook list
+* Right pane: **read-only live preview** of TOML
+* Editing a hook opens a modal:
+
+```
+┌──────── Edit onlyWithin ─────────┐
+│ Start Time: [09:00      ]        │
+│ End Time:   [17:00      ]        │
+│ Timezone:   [UTC        ]        │
+│                                  │
+│ [Enter] Save   [Esc] Cancel      │
+└──────────────────────────────────┘
+```
+
+**Design decision:**
+Do NOT allow free-form text editing of policies in UI. That belongs in `$EDITOR`, not Ratatui.
+
+---
+
+## 7. Timeline View (Full-Screen)
+
+Dedicated time visualization.
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ Timeline (UTC)                                           │
+├──────────────────────────────────────────────────────────┤
+│ 08:00 ──┬───────────────┬───────────────┬────────────── │
+│         │ [vpn-admin]   │               │               │
+│ 12:00 ──┼───────────────┼───────────────┼────────────── │
+│         │               │ [maintenance] │               │
+│ 16:00 ──┼───────────────┼───────────────┼────────────── │
+│                                                         │
+│ Selected: vpn-admin │ Active now: ✔                    │
+└──────────────────────────────────────────────────────────┘
+```
+
+### Implementation
+
+* Use `Canvas` with block coordinates
+* Time grid fixed (hour resolution)
+* Cursor highlights selected credential window
+
+---
+
+## 8. Audit Log Screen
+
+Immutable, append-only view.
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ Audit Log (signed)                                       │
+├──────────────────────────────────────────────────────────┤
+│ Time (UTC)        │ Credential │ Result  │ Reason       │
+│───────────────────┼────────────┼─────────┼──────────────│
+│ 14:02:01          │ vpn-admin  │ ACCEPT  │ within-window│
+│ 18:01:12          │ vpn-admin  │ REJECT  │ expired      │
+│                   │            │         │              │
+└──────────────────────────────────────────────────────────┘
+```
+
+* `Enter` on row opens detailed view (hash, signature, policy snapshot)
+* No delete. Ever.
+
+---
+
+## 9. Modal System (Critical)
+
+### Modal Types
+
+1. Confirm (destructive actions)
+2. Passphrase prompt
+3. Error (fatal/non-fatal)
+4. Info
+
+### Modal Rules
+
+* Always centered
+* Blocks background input
+* Explicit close keys only (`Enter`, `Esc`)
+* Stack depth max = 1 (no nested modals)
+
+---
+
+## 10. Input & Navigation Summary
+
+| Key     | Action             |
+| ------- | ------------------ |
+| `↑↓←→`  | Navigate           |
+| `Enter` | Select / Open      |
+| `Esc`   | Back / Close modal |
+| `/`     | Search/filter      |
+| `A`     | Add                |
+| `R`     | Rotate             |
+| `D`     | Delete (confirm)   |
+| `T`     | Timeline           |
+| `H`     | Help               |
+| `Q`     | Quit               |
+
+---
+
+## 11. Implementation Guidance (Realistic)
+
+### What Ratatui is good at
+
+* Lists, tables, structured panels
+* Deterministic redraws
+* Keyboard-driven workflows
+
+### What to avoid
+
+* Free-form text editors
+* Overly dynamic layouts
+* Sub-second animation
+
+### State Management
+
+Use:
+
+* `enum Screen`
+* `enum Modal`
+* Single `AppState` struct
+* Reducer-style `handle_event(event, state)`
+
+This prevents UI logic from bleeding into rendering.
+
+---
+
+## 12. Final Assessment (Blunt)
+
+This UI:
+
+* Is **implementable today** in Ratatui
+* Avoids terminal UX traps
+* Matches Timely Pass’s security posture
+* Scales from personal use → professional ops
