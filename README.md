@@ -47,18 +47,6 @@ timely-pass --help
 
 ## ⚡ Quick Start
 
-### Interactive TUI (New!)
-The easiest way to use Timely Pass is via the Terminal User Interface:
-```bash
-timely-pass tui
-```
-- **Navigate**: Up/Down arrows
-- **Add**: Press `a`
-- **Delete**: Press `d`
-- **Rotate**: Press `r`
-- **Copy**: Press `c`
-- **Search**: Press `/`
-
 ### CLI Commands
 
 #### 1. Initialize a Secret Store
