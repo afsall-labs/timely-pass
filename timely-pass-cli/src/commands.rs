@@ -8,7 +8,7 @@ use timely_pass_sdk::eval::{EvaluationContext, Verdict};
 use timely_pass_sdk::policy::Policy;
 use timely_pass_sdk::store::{Credential, SecretStore, SecretType};
 
-fn prompt_passphrase(confirm: bool) -> Result<Secret> {
+pub(crate) fn prompt_passphrase(confirm: bool) -> Result<Secret> {
     print!("Enter passphrase: ");
     io::stdout().flush()?;
     let pass = rpassword::read_password()?;
@@ -32,7 +32,7 @@ fn prompt_secret() -> Result<Vec<u8>> {
     Ok(secret.into_bytes())
 }
 
-fn open_store_helper(store_path: &PathBuf, passphrase: &Secret) -> Result<SecretStore> {
+pub(crate) fn open_store_helper(store_path: &PathBuf, passphrase: &Secret) -> Result<SecretStore> {
     match SecretStore::open(store_path, passphrase) {
         Ok(s) => Ok(s),
         Err(e) => {

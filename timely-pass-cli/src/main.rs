@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 mod commands;
+mod tui;
 
 #[derive(Parser)]
 #[command(name = "timely-pass")]
@@ -73,6 +74,9 @@ enum Commands {
         #[arg(long)]
         id: String,
     },
+
+    /// Launch interactive TUI
+    Ui,
 }
 
 #[tokio::main]
@@ -87,6 +91,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::Rotate { id } => commands::rotate(cli.store, id).await?,
         Commands::List => commands::list(cli.store).await?,
         Commands::Remove { id } => commands::remove(cli.store, id).await?,
+        Commands::Ui => tui::run(cli.store).await?,
     }
 
     Ok(())
