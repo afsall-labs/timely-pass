@@ -1,3 +1,15 @@
+//! # Timely Pass CLI
+//!
+//! `timely-pass-cli` is a command-line interface for the Timely Pass password manager.
+//! It allows users to:
+//! - Initialize secure stores.
+//! - Add, retrieve, rotate, and remove credentials.
+//! - Manage and evaluate time-based policies.
+//!
+//! ## Usage
+//!
+//! See the README or run `timely-pass --help` for detailed usage instructions.
+
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
