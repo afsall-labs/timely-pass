@@ -4,9 +4,16 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", tag = "type")]
 pub enum Period {
-    Instant { value: DateTime<Utc> },
-    Range { start: DateTime<Utc>, end: DateTime<Utc> },
-    Duration { seconds: u64 },
+    Instant {
+        value: DateTime<Utc>,
+    },
+    Range {
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    },
+    Duration {
+        seconds: u64,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

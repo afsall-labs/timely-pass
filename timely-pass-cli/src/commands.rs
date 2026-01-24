@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc};
 use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
-use timely_pass_sdk::crypto::{Secret, generate_random_bytes};
+use timely_pass_sdk::crypto::{generate_random_bytes, Secret};
 use timely_pass_sdk::eval::{EvaluationContext, Verdict};
 use timely_pass_sdk::policy::Policy;
 use timely_pass_sdk::store::{Credential, SecretStore, SecretType};
@@ -12,7 +12,7 @@ pub(crate) fn prompt_passphrase(confirm: bool) -> Result<Secret> {
     print!("Enter passphrase: ");
     io::stdout().flush()?;
     let pass = rpassword::read_password()?;
-    
+
     if confirm {
         print!("Confirm passphrase: ");
         io::stdout().flush()?;
@@ -21,7 +21,7 @@ pub(crate) fn prompt_passphrase(confirm: bool) -> Result<Secret> {
             anyhow::bail!("Passphrases do not match");
         }
     }
-    
+
     Ok(Secret::new(pass.into_bytes()))
 }
 
@@ -43,28 +43,28 @@ pub(crate) fn open_store_helper(store_path: &PathBuf, passphrase: &Secret) -> Re
                         anyhow::bail!("Store file not found at {:?}.\nPlease run 'timely-pass init' first to create a new store.", store_path);
                     }
                     if io_err.kind() == std::io::ErrorKind::UnexpectedEof {
-                         if let Ok(metadata) = std::fs::metadata(store_path) {
-                             if metadata.len() == 0 {
-                                 anyhow::bail!("Store file at {:?} is empty.\nPlease delete it and run 'timely-pass init' to create a new store.", store_path);
-                             }
-                         }
+                        if let Ok(metadata) = std::fs::metadata(store_path) {
+                            if metadata.len() == 0 {
+                                anyhow::bail!("Store file at {:?} is empty.\nPlease delete it and run 'timely-pass init' to create a new store.", store_path);
+                            }
+                        }
                     }
-                },
+                }
                 timely_pass_sdk::error::Error::Serialization(ref bin_err) => {
                     // Check if it's an IO error wrapped in Serialization (common with bincode)
                     if let bincode::ErrorKind::Io(ref io_err) = **bin_err {
                         if io_err.kind() == std::io::ErrorKind::UnexpectedEof {
-                             anyhow::bail!("Store file at {:?} is corrupted (incomplete data).\nPlease delete it and run 'timely-pass init' again.", store_path);
+                            anyhow::bail!("Store file at {:?} is corrupted (incomplete data).\nPlease delete it and run 'timely-pass init' again.", store_path);
                         }
                     }
                     // General corruption message
                     anyhow::bail!("Store file at {:?} is corrupted or invalid: {}\nPlease delete it and run 'timely-pass init' again.", store_path, bin_err);
-                },
+                }
                 timely_pass_sdk::error::Error::Crypto(ref msg) => {
                     if msg == "Decryption failed" {
                         anyhow::bail!("Failed to decrypt the store. \n\nCause: Incorrect passphrase or corrupted file.\n\nPlease try again with the correct passphrase.");
                     }
-                },
+                }
                 _ => {}
             }
             Err(e.into())
@@ -79,7 +79,7 @@ pub async fn init(store_path: PathBuf) -> Result<()> {
 
     println!("Initializing new store at {:?}", store_path);
     let passphrase = prompt_passphrase(true)?;
-    
+
     SecretStore::init(&store_path, &passphrase)?;
     println!("Store initialized successfully.");
     Ok(())
@@ -130,7 +130,7 @@ pub async fn add(
         // We need to implement Deserialize for Policy from TOML
         // Our Policy struct has Deserialize derived, so:
         let policy: Policy = toml::from_str(&content).context("Failed to parse policy TOML")?;
-        
+
         // Add policy to store
         store.add_policy(policy.clone())?;
         cred.policy_id = Some(policy.id);
@@ -147,9 +147,15 @@ pub async fn get(store_path: PathBuf, id: String) -> Result<()> {
 
     let (secret, policy_id, created_at, updated_at, usage_counter) = {
         let cred = store.get_credential(&id).context("Credential not found")?;
-        (cred.secret.clone(), cred.policy_id.clone(), cred.created_at, cred.updated_at, cred.usage_counter)
+        (
+            cred.secret.clone(),
+            cred.policy_id.clone(),
+            cred.created_at,
+            cred.updated_at,
+            cred.usage_counter,
+        )
     };
-    
+
     // Evaluate policy if present
     if let Some(pid) = policy_id {
         if let Some(policy) = store.get_policy(&pid) {
@@ -162,7 +168,7 @@ pub async fn get(store_path: PathBuf, id: String) -> Result<()> {
 
             let eval = policy.evaluate(&ctx);
             match eval.verdict {
-                Verdict::Accept => {},
+                Verdict::Accept => {}
                 v => {
                     println!("\n❌ ACCESS DENIED");
                     println!("Reason: {:?}", v);
@@ -182,8 +188,8 @@ pub async fn get(store_path: PathBuf, id: String) -> Result<()> {
     // Output secret (careful with printing bytes)
     match secret.type_ {
         SecretType::Password => {
-             println!("{}", String::from_utf8_lossy(&secret.data));
-        },
+            println!("{}", String::from_utf8_lossy(&secret.data));
+        }
         _ => {
             println!("{}", hex::encode(&secret.data));
         }
@@ -191,7 +197,7 @@ pub async fn get(store_path: PathBuf, id: String) -> Result<()> {
 
     // Update usage count
     store.increment_usage(&id)?;
-    
+
     Ok(())
 }
 
@@ -231,7 +237,10 @@ pub async fn list(store_path: PathBuf) -> Result<()> {
         println!("{:<20} {:<20} {:<30}", "ID", "Type", "Created At");
         println!("{:-<20} {:-<20} {:-<30}", "", "", "");
         for cred in creds {
-            println!("{:<20} {:<20?} {:<30}", cred.id, cred.secret.type_, cred.created_at);
+            println!(
+                "{:<20} {:<20?} {:<30}",
+                cred.id, cred.secret.type_, cred.created_at
+            );
         }
     }
     Ok(())
@@ -240,14 +249,14 @@ pub async fn list(store_path: PathBuf) -> Result<()> {
 pub async fn rotate(store_path: PathBuf, id: String) -> Result<()> {
     let passphrase = prompt_passphrase(false)?;
     let mut store = open_store_helper(&store_path, &passphrase)?;
-    
+
     // Check if exists
     let _ = store.get_credential(&id).context("Credential not found")?;
-    
+
     // For rotation, we usually generate a new secret.
     println!("Rotating credential '{}'", id);
     let new_secret_data = prompt_secret()?;
-    
+
     // Fetch, modify, insert.
     if let Some(mut cred) = store.get_credential(&id).cloned() {
         cred.secret.data = new_secret_data;
@@ -264,7 +273,7 @@ pub async fn policy_add(store_path: PathBuf, id: Option<String>, file: PathBuf) 
     let mut store = open_store_helper(&store_path, &passphrase)?;
 
     let content = fs::read_to_string(&file).context("Failed to read policy file")?;
-    
+
     // Try JSON first, then TOML
     let mut policy: Policy = match serde_json::from_str(&content) {
         Ok(p) => p,
@@ -383,6 +392,22 @@ pub async fn policy_update(
 pub async fn upgrade(version: Option<String>) -> Result<()> {
     println!("Upgrading timely-pass-cli...");
 
+    // Create a backup of the current executable to allow rollback and avoid locking issues
+    let renamed_exe = {
+        let current_exe = std::env::current_exe()?;
+        let old_exe = current_exe.with_extension("backup");
+        if old_exe.exists() {
+            let _ = std::fs::remove_file(&old_exe);
+        }
+        match std::fs::rename(&current_exe, &old_exe) {
+            Ok(_) => Some((current_exe, old_exe)),
+            Err(e) => {
+                println!("Warning: Failed to rename current executable: {}", e);
+                None
+            }
+        }
+    };
+
     let mut cmd = std::process::Command::new("cargo");
     cmd.arg("install");
     cmd.arg("timely-pass-cli");
@@ -398,6 +423,10 @@ pub async fn upgrade(version: Option<String>) -> Result<()> {
     if status.success() {
         println!("Upgrade completed successfully.");
     } else {
+        // Restore backup if failed
+        if let Some((current, old)) = renamed_exe {
+            let _ = std::fs::rename(old, current);
+        }
         anyhow::bail!("Upgrade failed with exit code: {:?}", status.code());
     }
 

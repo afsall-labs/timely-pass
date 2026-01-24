@@ -46,17 +46,21 @@ fn test_policy_evaluation() {
 
     let policy = Policy::new("test-policy")
         .add_hook(Hook::OnlyBefore {
-            period: Period::Instant { value: now + one_hour },
+            period: Period::Instant {
+                value: now + one_hour,
+            },
         })
         .add_hook(Hook::OnlyAfter {
-            period: Period::Instant { value: now - one_hour },
+            period: Period::Instant {
+                value: now - one_hour,
+            },
         });
 
     let ctx_valid = EvaluationContext {
         now,
         ..Default::default()
     };
-    
+
     let eval = policy.evaluate(&ctx_valid);
     assert_eq!(eval.verdict, Verdict::Accept);
 
@@ -72,10 +76,11 @@ fn test_policy_evaluation() {
 fn test_only_for_duration() {
     let now = Utc::now();
     let created = now - Duration::minutes(30);
-    
+
     // Valid for 1 hour after creation
-    let policy = Policy::new("duration-policy")
-        .add_hook(Hook::OnlyFor { duration_secs: 3600 }); // 1 hour
+    let policy = Policy::new("duration-policy").add_hook(Hook::OnlyFor {
+        duration_secs: 3600,
+    }); // 1 hour
 
     let ctx_valid = EvaluationContext {
         now, // 30 mins after creation
@@ -89,5 +94,8 @@ fn test_only_for_duration() {
         created_at: Some(created),
         ..Default::default()
     };
-    assert!(matches!(policy.evaluate(&ctx_expired).verdict, Verdict::Expired));
+    assert!(matches!(
+        policy.evaluate(&ctx_expired).verdict,
+        Verdict::Expired
+    ));
 }

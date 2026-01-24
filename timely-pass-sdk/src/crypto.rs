@@ -47,12 +47,16 @@ impl MasterKey {
         Self(key)
     }
 
-    pub fn derive_from_passphrase(passphrase: &Secret, salt: Option<&[u8]>) -> Result<(Self, Vec<u8>)> {
+    pub fn derive_from_passphrase(
+        passphrase: &Secret,
+        salt: Option<&[u8]>,
+    ) -> Result<(Self, Vec<u8>)> {
         let salt = match salt {
             Some(s) => {
-                let s_str = std::str::from_utf8(s).map_err(|_| Error::Crypto("Invalid salt utf8".into()))?;
+                let s_str = std::str::from_utf8(s)
+                    .map_err(|_| Error::Crypto("Invalid salt utf8".into()))?;
                 SaltString::from_b64(s_str).map_err(|e| Error::Crypto(e.to_string()))?
-            },
+            }
             None => SaltString::generate(&mut OsRng),
         };
 
@@ -60,13 +64,15 @@ impl MasterKey {
         let password_hash = argon2
             .hash_password(passphrase.as_bytes(), &salt)
             .map_err(|e| Error::Crypto(e.to_string()))?;
-        
-        let hash = password_hash.hash.ok_or_else(|| Error::Crypto("No hash output".into()))?;
-        
+
+        let hash = password_hash
+            .hash
+            .ok_or_else(|| Error::Crypto("No hash output".into()))?;
+
         let key_bytes = hash.as_bytes().to_vec();
-        
+
         // Return raw salt bytes (decoded from b64 if needed, or just keep original bytes?)
-        // SaltString handles b64 encoding. 
+        // SaltString handles b64 encoding.
         // We want to return something we can store and reuse.
         // `salt` is a SaltString.
         // `salt.as_str()` gives the b64 string.
@@ -82,14 +88,14 @@ impl MasterKey {
         // If we want the raw bytes, `SaltString` doesn't easily give them back if generated?
         // Actually, `SaltString` wraps a b64 string.
         // Let's just store the string bytes.
-        
+
         Ok((Self(key_bytes), salt.as_str().as_bytes().to_vec()))
     }
 
     pub fn encrypt(&self, plaintext: &[u8], associated_data: &[u8]) -> Result<Vec<u8>> {
         let cipher = XChaCha20Poly1305::new_from_slice(&self.0)
             .map_err(|_| Error::Crypto("Invalid key length".into()))?;
-        
+
         let mut nonce_bytes = [0u8; NONCE_LEN];
         OsRng.fill_bytes(&mut nonce_bytes);
         let nonce = XNonce::from_slice(&nonce_bytes);
@@ -118,7 +124,7 @@ impl MasterKey {
 
         let (nonce_bytes, ciphertext) = ciphertext_with_nonce.split_at(NONCE_LEN);
         let nonce = XNonce::from_slice(nonce_bytes);
-        
+
         let cipher = XChaCha20Poly1305::new_from_slice(&self.0)
             .map_err(|_| Error::Crypto("Invalid key length".into()))?;
 
