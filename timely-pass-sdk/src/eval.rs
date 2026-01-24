@@ -44,11 +44,14 @@ impl Policy {
 
         // Check single use
         if self.single_use && ctx.usage_count > 0 {
-             return PolicyEvaluation {
+            return PolicyEvaluation {
                 verdict: Verdict::Reject,
                 matched_hooks,
                 details: {
-                    details.insert("reason".to_string(), "Single use policy violation".to_string());
+                    details.insert(
+                        "reason".to_string(),
+                        "Single use policy violation".to_string(),
+                    );
                     details
                 },
             };
@@ -84,8 +87,8 @@ impl Policy {
                 },
                 Hook::OnlyFor { duration_secs } => {
                     if let Some(created) = ctx.created_at {
-                         let end_time = created + chrono::Duration::seconds(*duration_secs as i64);
-                         ctx.now <= end_time
+                        let end_time = created + chrono::Duration::seconds(*duration_secs as i64);
+                        ctx.now <= end_time
                     } else {
                         // If we don't know creation time, we can't enforce OnlyFor, so we might fail closed?
                         // Or maybe it's a configuration error. Fail closed for security.
@@ -95,12 +98,12 @@ impl Policy {
             };
 
             if !passed {
-                // If ANY hook fails, the policy fails (AND logic). 
+                // If ANY hook fails, the policy fails (AND logic).
                 // Wait, are hooks AND or OR?
                 // PRD doesn't explicitly say, but usually policies are restrictive "OnlyBefore X AND OnlyAfter Y".
                 // "accepts only if..." implies restrictive.
                 // So if any hook fails, we reject.
-                
+
                 // However, we need to return specific verdicts.
                 let reason = match hook {
                     Hook::OnlyBefore { .. } => "Expired (After allowed time)",
@@ -108,7 +111,7 @@ impl Policy {
                     Hook::OnlyWithin { .. } => "Outside allowed window",
                     Hook::OnlyFor { .. } => "Expired (Duration elapsed)",
                 };
-                
+
                 details.insert("failed_hook_index".to_string(), i.to_string());
                 details.insert("reason".to_string(), reason.to_string());
 
@@ -124,7 +127,7 @@ impl Policy {
                     details,
                 };
             }
-            
+
             matched_hooks.push(i);
         }
 

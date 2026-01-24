@@ -160,7 +160,12 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Commands::Init => commands::init(cli.store).await?,
-        Commands::Add { id, type_, policy, secret } => commands::add(cli.store, id, type_, policy, secret).await?,
+        Commands::Add {
+            id,
+            type_,
+            policy,
+            secret,
+        } => commands::add(cli.store, id, type_, policy, secret).await?,
         Commands::Get { id } => commands::get(cli.store, id).await?,
         Commands::Eval { policy, time } => commands::eval(policy, time).await?,
         Commands::Rotate { id } => commands::rotate(cli.store, id).await?,
@@ -171,9 +176,29 @@ async fn main() -> anyhow::Result<()> {
             PolicyCommands::Get { id } => commands::policy_get(cli.store, id).await?,
             PolicyCommands::List => commands::policy_list(cli.store).await?,
             PolicyCommands::Remove { id } => commands::policy_remove(cli.store, id).await?,
-            PolicyCommands::Update { id, enable, disable, skew, timezone, max_attempts, single_use, multi_use } => {
-                commands::policy_update(cli.store, id, enable, disable, skew, timezone, max_attempts, single_use, multi_use).await?
-            },
+            PolicyCommands::Update {
+                id,
+                enable,
+                disable,
+                skew,
+                timezone,
+                max_attempts,
+                single_use,
+                multi_use,
+            } => {
+                commands::policy_update(
+                    cli.store,
+                    id,
+                    enable,
+                    disable,
+                    skew,
+                    timezone,
+                    max_attempts,
+                    single_use,
+                    multi_use,
+                )
+                .await?
+            }
         },
         Commands::Upgrade { version } => commands::upgrade(version).await?,
     }

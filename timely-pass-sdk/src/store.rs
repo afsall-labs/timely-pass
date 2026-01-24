@@ -71,7 +71,12 @@ pub struct AuditEntry {
 }
 
 impl AuditEntry {
-    pub fn new(action: impl Into<String>, target_type: impl Into<String>, target_id: impl Into<String>, details: impl Into<String>) -> Self {
+    pub fn new(
+        action: impl Into<String>,
+        target_type: impl Into<String>,
+        target_id: impl Into<String>,
+        details: impl Into<String>,
+    ) -> Self {
         Self {
             timestamp: Utc::now(),
             action: action.into(),
@@ -102,16 +107,21 @@ pub struct SecretStore {
 impl SecretStore {
     pub fn init(path: impl AsRef<Path>, passphrase: &Secret) -> Result<Self> {
         let (master_key, salt) = MasterKey::derive_from_passphrase(passphrase, None)?;
-        
+
         let store = Self {
             path: path.as_ref().to_path_buf(),
             master_key,
             salt,
             credentials: HashMap::new(),
             policies: HashMap::new(),
-            audit_logs: vec![AuditEntry::new("init", "system", "store", "Store initialized")],
+            audit_logs: vec![AuditEntry::new(
+                "init",
+                "system",
+                "store",
+                "Store initialized",
+            )],
         };
-        
+
         store.save()?;
         Ok(store)
     }
@@ -119,24 +129,25 @@ impl SecretStore {
     pub fn open(path: impl AsRef<Path>, passphrase: &Secret) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
         let mut file = File::open(&path).map_err(Error::Io)?;
-        
+
         let mut header_len_bytes = [0u8; 4];
         file.read_exact(&mut header_len_bytes).map_err(Error::Io)?;
         let header_len = u32::from_le_bytes(header_len_bytes) as usize;
-        
+
         let mut header_bytes = vec![0u8; header_len];
         file.read_exact(&mut header_bytes).map_err(Error::Io)?;
-        
+
         let header: StoreHeader = bincode::deserialize(&header_bytes)?;
-        
+
         let mut encrypted_payload = Vec::new();
-        file.read_to_end(&mut encrypted_payload).map_err(Error::Io)?;
-        
+        file.read_to_end(&mut encrypted_payload)
+            .map_err(Error::Io)?;
+
         let master_key = MasterKey::derive_from_passphrase(passphrase, Some(&header.salt))?.0;
-        
+
         let payload_bytes = master_key.decrypt(&encrypted_payload, &header_bytes)?;
         let payload: StorePayload = bincode::deserialize(&payload_bytes)?;
-        
+
         Ok(Self {
             path,
             master_key,
@@ -168,18 +179,25 @@ impl SecretStore {
         // Write to temp file first
         let dir = self.path.parent().unwrap_or_else(|| Path::new("."));
         let mut temp_file = tempfile::NamedTempFile::new_in(dir).map_err(Error::Io)?;
-        
+
         temp_file.write_all(&header_len.to_le_bytes())?;
         temp_file.write_all(&header_bytes)?;
         temp_file.write_all(&encrypted_payload)?;
-        
-        temp_file.persist(&self.path).map_err(|e| Error::Io(e.error))?;
+
+        temp_file
+            .persist(&self.path)
+            .map_err(|e| Error::Io(e.error))?;
 
         Ok(())
     }
 
     pub fn add_policy(&mut self, policy: Policy) -> Result<()> {
-        self.audit_logs.push(AuditEntry::new("add", "policy", &policy.id, format!("Policy added/updated: version {}", policy.version)));
+        self.audit_logs.push(AuditEntry::new(
+            "add",
+            "policy",
+            &policy.id,
+            format!("Policy added/updated: version {}", policy.version),
+        ));
         self.policies.insert(policy.id.clone(), policy);
         self.save()
     }
@@ -190,7 +208,8 @@ impl SecretStore {
 
     pub fn remove_policy(&mut self, id: &str) -> Result<()> {
         if self.policies.remove(id).is_some() {
-            self.audit_logs.push(AuditEntry::new("remove", "policy", id, "Policy removed"));
+            self.audit_logs
+                .push(AuditEntry::new("remove", "policy", id, "Policy removed"));
             self.save()
         } else {
             Ok(())
@@ -206,7 +225,12 @@ impl SecretStore {
     }
 
     pub fn add_credential(&mut self, cred: Credential) -> Result<()> {
-        self.audit_logs.push(AuditEntry::new("add", "credential", &cred.id, format!("Credential added: {}", cred.label)));
+        self.audit_logs.push(AuditEntry::new(
+            "add",
+            "credential",
+            &cred.id,
+            format!("Credential added: {}", cred.label),
+        ));
         self.credentials.insert(cred.id.clone(), cred);
         self.save()
     }
@@ -221,7 +245,12 @@ impl SecretStore {
 
     pub fn remove_credential(&mut self, id: &str) -> Result<()> {
         if self.credentials.remove(id).is_some() {
-            self.audit_logs.push(AuditEntry::new("remove", "credential", id, "Credential removed"));
+            self.audit_logs.push(AuditEntry::new(
+                "remove",
+                "credential",
+                id,
+                "Credential removed",
+            ));
             self.save()
         } else {
             Ok(())
@@ -232,9 +261,14 @@ impl SecretStore {
         if let Some(cred) = self.credentials.get_mut(id) {
             cred.usage_counter += 1;
             cred.updated_at = Utc::now();
-            // We don't necessarily want to log every usage in audit log to avoid bloat, 
+            // We don't necessarily want to log every usage in audit log to avoid bloat,
             // but for security it might be good. Let's log it.
-            self.audit_logs.push(AuditEntry::new("usage", "credential", id, "Credential accessed"));
+            self.audit_logs.push(AuditEntry::new(
+                "usage",
+                "credential",
+                id,
+                "Credential accessed",
+            ));
             self.save()
         } else {
             Err(Error::Store(format!("Credential {} not found", id)))

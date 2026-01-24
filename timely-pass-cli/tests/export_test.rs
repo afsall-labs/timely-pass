@@ -1,7 +1,7 @@
-use timely_pass_sdk::policy::{Policy, Hook, Period};
-use timely_pass_sdk::store::{Credential, SecretType};
 use chrono::Utc;
 use serde_json;
+use timely_pass_sdk::policy::{Hook, Period, Policy};
+use timely_pass_sdk::store::{Credential, SecretType};
 
 #[test]
 fn test_policy_serialization() {
@@ -9,7 +9,7 @@ fn test_policy_serialization() {
     policy.clock_skew_secs = 120;
     policy.single_use = true;
     policy.hooks.push(Hook::OnlyAfter {
-        period: Period::Instant { value: Utc::now() }
+        period: Period::Instant { value: Utc::now() },
     });
 
     let json = serde_json::to_string_pretty(&policy).expect("Failed to serialize policy");
@@ -33,7 +33,8 @@ fn test_credential_serialization() {
     let json = serde_json::to_string_pretty(&cred).expect("Failed to serialize credential");
     println!("Serialized Credential:\n{}", json);
 
-    let deserialized: Credential = serde_json::from_str(&json).expect("Failed to deserialize credential");
+    let deserialized: Credential =
+        serde_json::from_str(&json).expect("Failed to deserialize credential");
     assert_eq!(cred.id, deserialized.id);
     assert_eq!(cred.label, deserialized.label);
     // Note: Secret data is NOT serialized/deserialized by default if we were using a custom serializer that hides it,
@@ -43,7 +44,7 @@ fn test_credential_serialization() {
     // The `type_` field has `#[zeroize(skip)]`.
     // The `data` field is `Vec<u8>`.
     // It should serialize fine.
-    
+
     assert_eq!(cred.secret.type_, deserialized.secret.type_);
     assert_eq!(cred.secret.data, deserialized.secret.data);
 }
