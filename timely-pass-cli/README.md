@@ -61,4 +61,4 @@ timely-pass upgrade --version 0.2.0
 
 ## 📄 License
 
-MIT
+TimelyPass is dual-licensed under [Apache-2.0](LICENSE-APACHE) and [MIT](LICENSE-MIT).

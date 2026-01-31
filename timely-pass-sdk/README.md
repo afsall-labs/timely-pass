@@ -85,4 +85,4 @@ This SDK is designed with a "Security First" mindset.
 
 ## 📄 License
 
-MIT
+TimelyPass is dual-licensed under [Apache-2.0](LICENSE-APACHE) and [MIT](LICENSE-MIT).
