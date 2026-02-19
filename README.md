@@ -6,6 +6,10 @@ Built with a "Security First" mindset, Timely Pass ensures strict cryptographic 
 
 ---
 
+![Alt](https://repobeats.axiom.co/api/embed/b5d13d01c2200e51521e335edeeae8b02589cb24.svg "Repobeats analytics image")
+
+---
+
 ## 🚀 Features
 
 - **Time-Based Policies**: Define complex validity rules using composable hooks:
